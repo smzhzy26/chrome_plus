@@ -81,13 +81,14 @@ uint16_t GetPakTargetId() {
 // DACL grants read to Everyone and to RestrictedCode (the renderer's
 // restricting SID), so a renderer's pre-lockdown token can open the section
 // at the same point it maps the pak.
-void PublishPatchedEntry(uint8_t* buffer, uint16_t resource_id) {
+void PublishPatchedEntry(uint8_t* buffer, size_t buffer_size,
+                          uint16_t resource_id) {
   // After an in-app restart the new browser inherits the old browser's
   // section name, which dies with that process; drop it and republish under
   // this pid.
   SetEnvironmentVariableW(kPakBlobEnv, nullptr);
 
-  const auto slot = FindResourceSlot(buffer, resource_id);
+  const auto slot = FindResourceSlot(buffer, buffer_size, resource_id);
   if (!slot) {
     return;
   }
@@ -138,7 +139,7 @@ void PublishPatchedEntry(uint8_t* buffer, uint16_t resource_id) {
 // the browser's already-patched bytes. The slot is re-derived from this
 // process's own pak index and the lengths must match, so a section built from
 // a different pak is rejected and the copy cannot write outside the slot.
-bool ApplyPatchedEntry(uint8_t* buffer) {
+bool ApplyPatchedEntry(uint8_t* buffer, size_t buffer_size) {
   wchar_t name[64];
   DWORD len = GetEnvironmentVariableW(kPakBlobEnv, name, ARRAYSIZE(name));
   if (len == 0 || len >= ARRAYSIZE(name)) {
@@ -157,7 +158,8 @@ bool ApplyPatchedEntry(uint8_t* buffer) {
     std::optional<PakResourceSlot> slot;
     if (header->resource_id <= 0xFFFF) {
       slot =
-          FindResourceSlot(buffer, static_cast<uint16_t>(header->resource_id));
+          FindResourceSlot(buffer, buffer_size,
+                       static_cast<uint16_t>(header->resource_id));
     }
     if (slot && slot->length == header->length) {
       memcpy(buffer + slot->offset, view + sizeof(PakBlobHeader), slot->length);
@@ -214,24 +216,26 @@ bool PatchSettingsHtml(uint8_t* begin, uint32_t size, size_t& new_len) {
 // inside `MyMapViewOfFile` after both hooks have detached themselves, so the
 // section create/open/map calls in the publish and apply helpers reach the
 // real APIs, not our hooks.
-void PatchResourcesPak(uint8_t* buffer) {
+void PatchResourcesPak(uint8_t* buffer, size_t buffer_size) {
   const bool is_browser = IsBrowserProcess();
-  if (!is_browser && ApplyPatchedEntry(buffer)) {
+  if (!is_browser && ApplyPatchedEntry(buffer, buffer_size)) {
     return;
   }
 
   const uint16_t target_id = GetPakTargetId();
-  uint16_t matched_id = TraversalGZIPFile(buffer, PatchSettingsHtml, target_id);
+  uint16_t matched_id =
+      TraversalGZIPFile(buffer, buffer_size, PatchSettingsHtml, target_id);
   if (matched_id == 0 && target_id != 0) {
     // The inherited id missed, so the pak was replaced (browser updated
     // between sessions); redo the full content scan.
-    matched_id = TraversalGZIPFile(buffer, PatchSettingsHtml, 0);
+    matched_id =
+        TraversalGZIPFile(buffer, buffer_size, PatchSettingsHtml, 0);
   }
 
   if (is_browser && matched_id != 0) {
     SetEnvironmentVariableW(kPakTargetIdEnv,
                             std::to_wstring(matched_id).c_str());
-    PublishPatchedEntry(buffer, matched_id);
+    PublishPatchedEntry(buffer, buffer_size, matched_id);
   }
 }
 
@@ -258,7 +262,25 @@ HANDLE WINAPI MyMapViewOfFile(_In_ HANDLE hFileMappingObject,
     }
 
     if (buffer) {
-      PatchResourcesPak(static_cast<uint8_t*>(buffer));
+      // Every offset read out of the pak is validated against this, so it has to
+      // be the real view length. `dwNumberOfBytesToMap` is 0 when the caller
+      // mapped the whole file, and with a non-zero file offset it would be a
+      // partial length; `VirtualQuery` reports the mapped region instead. Its
+      // value is page-rounded, i.e. an upper bound on the file, which is the
+      // safe direction for a bounds check.
+      size_t buffer_size = dwNumberOfBytesToMap;
+      MEMORY_BASIC_INFORMATION region{};
+      if (VirtualQuery(buffer, &region, sizeof(region))) {
+        if (dwNumberOfBytesToMap == 0 || region.RegionSize < buffer_size) {
+          buffer_size = region.RegionSize;
+        }
+      } else if (buffer_size == 0) {
+        // No size from either source. The bounds check would then reject every
+        // pak and the patch would silently not apply, so say so instead.
+        DebugLog(L"PakPatch: cannot size the mapped pak view ({})",
+                 GetLastError());
+      }
+      PatchResourcesPak(static_cast<uint8_t*>(buffer), buffer_size);
     }
 
     return buffer;
