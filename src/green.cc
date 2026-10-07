@@ -199,6 +199,6 @@ void MakeGreen() {
 
   auto status = DetourTransactionCommit();
   if (status != NO_ERROR) {
-    DebugLog(L"MakeGreen failed: {}", status);
+    WarnLog(L"Green: cannot install the hooks (error " + std::to_wstring(status) + L"); green mode will not take effect");
   }
 }

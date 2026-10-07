@@ -258,7 +258,7 @@ HANDLE WINAPI MyMapViewOfFile(_In_ HANDLE hFileMappingObject,
                  reinterpret_cast<void*>(MyMapViewOfFile));
     auto status = DetourTransactionCommit();
     if (status != NO_ERROR) {
-      DebugLog(L"Unhook RawMapViewOfFile failed {}", status);
+      WarnLog(L"PakPatch: cannot unhook MapViewOfFile (error " + std::to_wstring(status) + L")");
     }
 
     if (buffer) {
@@ -337,7 +337,7 @@ HANDLE WINAPI MyCreateFileMapping(_In_ HANDLE hFile,
                  reinterpret_cast<void*>(MyCreateFileMapping));
     auto status = DetourTransactionCommit();
     if (status != NO_ERROR) {
-      DebugLog(L"Unhook RawCreateFileMapping failed {}", status);
+      WarnLog(L"PakPatch: cannot unhook CreateFileMapping (error " + std::to_wstring(status) + L")");
     }
 
     DetourTransactionBegin();
@@ -346,7 +346,7 @@ HANDLE WINAPI MyCreateFileMapping(_In_ HANDLE hFile,
                  reinterpret_cast<void*>(MyMapViewOfFile));
     status = DetourTransactionCommit();
     if (status != NO_ERROR) {
-      DebugLog(L"Hook RawMapViewOfFile failed {}", status);
+      WarnLog(L"PakPatch: cannot hook MapViewOfFile (error " + std::to_wstring(status) + L"); the resources.pak patch will not be applied");
     }
 
     return resources_pak_map;
@@ -364,6 +364,11 @@ void PakPatch() {
                reinterpret_cast<void*>(MyCreateFileMapping));
   auto status = DetourTransactionCommit();
   if (status != NO_ERROR) {
-    DebugLog(L"Hook RawCreateFileMapping failed {}", status);
+    // Without this hook the pak is never patched, so the settings page and the
+    // hide-this-tab entry look untouched. That is indistinguishable from the
+    // feature not existing, which is why it is reported in release builds.
+    WarnLog(L"PakPatch: cannot hook CreateFileMapping (error " +
+            std::to_wstring(status) +
+            L"); the resources.pak patch will not be applied");
   }
 }

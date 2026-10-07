@@ -180,6 +180,6 @@ void SetAppId() {
                reinterpret_cast<void*>(MySHGetPropertyStoreForWindow));
   auto status = DetourTransactionCommit();
   if (status != NO_ERROR) {
-    DebugLog(L"SetAppId failed {}", status);
+    WarnLog(L"AppId: cannot install the hooks (error " + std::to_wstring(status) + L"); taskbar grouping may be wrong");
   }
 }

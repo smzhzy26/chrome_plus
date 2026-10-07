@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "utils.h"
@@ -78,8 +79,29 @@ bool IsKeyPressed(int vk) {
 }
 
 void InstallInputHooks() {
+  // Both results were discarded and nothing was logged, so a failure here left
+  // every keyboard and mouse feature dead with nothing to explain it: the user
+  // sees key mappings, the boss key and the translate key all doing nothing, and
+  // no way to tell that from having configured them wrongly. `hInstance` can be
+  // null too, which makes the call fail in a way that is easy to miss.
+  if (hInstance == nullptr) {
+    WarnLog(L"InputHooks: the module handle is null; input hooks not installed");
+    return;
+  }
+
   keyboard_hook = SetWindowsHookEx(WH_KEYBOARD, KeyboardProc, hInstance,
                                    GetCurrentThreadId());
+  if (keyboard_hook == nullptr) {
+    WarnLog(L"InputHooks: SetWindowsHookEx(WH_KEYBOARD) failed with error " +
+            std::to_wstring(GetLastError()) +
+            L"; key mappings and the boss key will not work");
+  }
+
   mouse_hook =
       SetWindowsHookEx(WH_MOUSE, MouseProc, hInstance, GetCurrentThreadId());
+  if (mouse_hook == nullptr) {
+    WarnLog(L"InputHooks: SetWindowsHookEx(WH_MOUSE) failed with error " +
+            std::to_wstring(GetLastError()) +
+            L"; mouse gestures will not work");
+  }
 }

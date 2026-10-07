@@ -100,7 +100,7 @@ void InstallLoader() {
                reinterpret_cast<void*>(Loader));
   auto status = DetourTransactionCommit();
   if (status != NO_ERROR) {
-    DebugLog(L"InstallLoader failed: {}", status);
+    WarnLog(L"Loader: cannot hook the entry point (error " + std::to_wstring(status) + L"); Chrome++ will not take effect");
   }
 }
 

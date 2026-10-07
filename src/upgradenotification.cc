@@ -179,7 +179,7 @@ void SuppressFalseUpgradeNotification() {
                reinterpret_cast<void*>(MyRegQueryValueExW));
   auto status = DetourTransactionCommit();
   if (status != NO_ERROR) {
-    DebugLog(L"SuppressFalseUpgradeNotification hooks failed: {}", status);
+    WarnLog(L"UpgradeNotification: cannot install the hooks (error " + std::to_wstring(status) + L"); Chrome may report a false upgrade again");
   } else {
     DebugLog(L"SuppressFalseUpgradeNotification: hooks installed");
   }

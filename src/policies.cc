@@ -52,7 +52,7 @@ void IgnorePolicies() {
                reinterpret_cast<void*>(MyRegOpenKeyExW));
   auto status = DetourTransactionCommit();
   if (status != NO_ERROR) {
-    DebugLog(L"IgnorePolicies failed: {}", status);
+    WarnLog(L"Policies: cannot hook RegOpenKeyExW (error " + std::to_wstring(status) + L"); ignore_policies will not take effect");
   } else {
     DebugLog(L"IgnorePolicies enabled.");
   }

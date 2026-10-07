@@ -319,7 +319,10 @@ void InitKeyMapping() {
     mapping.source_vk = HIWORD(source_parsed);
 
     if (mapping.source_vk == 0) {
-      DebugLog(L"KeyMapping: Invalid source key '{}'", source);
+      // Reported in release builds: a mapping the user wrote is being ignored,
+      // and only they can fix it, but only if they are told which line and why.
+      WarnLog(L"KeyMapping: '" + std::wstring(source) +
+              L"' is not a key name that can be parsed; that mapping is ignored");
       continue;
     }
 
@@ -328,7 +331,8 @@ void InitKeyMapping() {
       command_str.remove_prefix(8);
       mapping.target_command = ParseCommand(command_str);
       if (mapping.target_command == 0) {
-        DebugLog(L"KeyMapping: Invalid command '{}'", target);
+        WarnLog(L"KeyMapping: '" + std::wstring(target) +
+                L"' does not name a command; that mapping is ignored");
         continue;
       }
     } else {
@@ -337,7 +341,8 @@ void InitKeyMapping() {
       mapping.target_vk = HIWORD(target_parsed);
 
       if (mapping.target_vk == 0) {
-        DebugLog(L"KeyMapping: Invalid target key '{}'", target);
+        WarnLog(L"KeyMapping: '" + std::wstring(target) +
+                L"' is not a key name that can be parsed; that mapping is ignored");
         continue;
       }
     }
@@ -391,7 +396,9 @@ void InitTranslateKey() {
   translate_key.vk = HIWORD(parsed);
 
   if (translate_key.vk == 0) {
-    DebugLog(L"TranslateKey: Invalid key '{}'", translate_key_str);
+    WarnLog(L"TranslateKey: '" + translate_key_str +
+            L"' is not a key name that can be parsed; the translate key is "
+            L"not registered");
     return;
   }
 

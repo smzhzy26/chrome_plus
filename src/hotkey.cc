@@ -222,8 +222,16 @@ void Hotkey(std::wstring_view keys, HotkeyAction action) {
   } else {
     UINT flag = ParseHotkeys(keys.data());
 
-    std::thread th([flag, action]() {
-      RegisterHotKey(nullptr, 0, LOWORD(flag), HIWORD(flag));
+    std::thread th([flag, action, keys = std::wstring(keys)]() {
+      // The return value was discarded, so a boss key another program had already
+      // claimed, or one Windows refuses, produced a hotkey that simply never
+      // fired. The key name and the error are both reported: the user needs to
+      // know which binding to change.
+      if (!RegisterHotKey(nullptr, 0, LOWORD(flag), HIWORD(flag))) {
+        WarnLog(L"Hotkey: RegisterHotKey failed for '" + keys + L"' with error " +
+                std::to_wstring(GetLastError()) +
+                L"; the boss key will not work");
+      }
 
       MSG msg;
       while (GetMessage(&msg, nullptr, 0, 0)) {

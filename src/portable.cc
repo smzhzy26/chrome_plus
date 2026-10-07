@@ -286,5 +286,5 @@ void Portable(LPWSTR param) {
     ::CloseHandle(process_info.hProcess);
     ExitProcess(0);
   }
-  DebugLog(L"Create portable process failed: {}", GetLastError());
+  WarnLog(L"Portable: cannot start the browser process (error " + std::to_wstring(GetLastError()) + L")");
 }
