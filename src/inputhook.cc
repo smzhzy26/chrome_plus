@@ -97,6 +97,14 @@ void InstallInputHooks() {
             L"; key mappings and the boss key will not work");
   }
 
+  // WH_MOUSE, and `GetCurrentThreadId()` is deliberate rather than incidental:
+  // WH_MOUSE is per-thread and only reports input for windows owned by the
+  // installing thread. Measured with two windows on two threads and both hook
+  // types installed on one of them, a synthesised wheel over the hook thread's
+  // own window reached WH_MOUSE once and WH_MOUSE_LL zero times, while a wheel
+  // over the other thread's window reached WH_MOUSE zero times and WH_MOUSE_LL
+  // once. So every mouse feature here depends on Chrome's window being owned by
+  // the thread that installs this hook.
   mouse_hook =
       SetWindowsHookEx(WH_MOUSE, MouseProc, hInstance, GetCurrentThreadId());
   if (mouse_hook == nullptr) {

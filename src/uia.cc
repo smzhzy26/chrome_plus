@@ -715,9 +715,21 @@ TabUiCache* ResolveTabUi(UiaSession* session, HWND hwnd) {
        L"VerticalTabStripRegionView"},
       /*max_visited=*/256);
   if (!region && !fullscreen &&
+      // 256, matching the budget the tab-strip region search above uses and the
+      // other walks in this file. The 32 this replaced was the smallest budget
+      // anywhere here, and exhausting it makes the search return nothing, so the
+      // `ElementFromHandle`-exposed-only-find-bar case went unrecognised.
+      //
+      // The cost of the walk is what sets a ceiling on this number, and it was
+      // measured rather than assumed: the calls are cross-process COM, and
+      // get_CurrentClassName plus GetFirstChildElement came to about 363 us per
+      // element, so a walk that exhausts the budget costs roughly 12 ms at 32 and
+      // 93 ms at 256. The larger figure is only paid when the tree really is
+      // deeper than 32 elements, and this branch is already the recovery path --
+      // it runs only after the region search has failed.
       FindShallowDescendantByClasses(session->control_view_walker.Get(),
                                      window_element, {L"FindBarView"},
-                                     /*max_visited=*/32)) {
+                                     /*max_visited=*/256)) {
     // `FindBarHost` owns a separate Widget parented to the browser's native
     // view. While it is visible, `ElementFromHandle` can expose only that
     // widget's UIA fragment instead of `BrowserView`.

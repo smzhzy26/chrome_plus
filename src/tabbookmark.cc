@@ -223,11 +223,26 @@ bool HandleMouseWheel(LPARAM lParam, const MOUSEHOOKSTRUCT* pmouse) {
   };
 
   // If it is used to switch tabs when the right button is held.
+  //
+  // This branch and the one below differ in what they depend on, and that
+  // difference is the whole story of `wheel_tab`:
+  //
+  //   this one needs the hook to see the wheel, and nothing else;
+  //   the one below also needs `IsOnTabBar` to locate the tab strip.
+  //
+  // `IsOnTabBar` resolves the strip through UI Automation, matching the class
+  // names Chromium gives those views (`HorizontalTabStripRegionView`,
+  // `VerticalTabStripRegionView`, ...). Chrome does not expose those unless
+  // accessibility has been turned on, so on a default profile `IsOnTabBar` never
+  // succeeds and `wheel_tab` cannot work -- regardless of the wheel reaching the
+  // hook. That is why `wheel_tab` defaults to off in the shipped ini while this
+  // branch stays available: it does not depend on the accessibility tree.
   if (config.IsWheelTabWhenPressRightButton() && IsKeyPressed(VK_RBUTTON)) {
     return switch_tabs();
   }
 
   // If the mouse wheel is used to switch tabs when the mouse is on the tab bar.
+  // See the note above: this needs the strip to be visible to UI Automation.
   if (config.IsWheelTab() && IsOnTabBar(pmouse->pt)) {
     return switch_tabs();
   }
