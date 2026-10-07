@@ -97,7 +97,15 @@ add_compile_definitions(
 
 add_compile_options(
   $<$<COMPILE_LANGUAGE:C,CXX>:/W3>
-  $<$<COMPILE_LANGUAGE:C,CXX>:/source-charset:utf-8>
+  # The sources carry non-ASCII literals (the arrow-key names in src/utils.cc),
+  # so the source charset is pinned per frontend rather than left to a default.
+  # clang-cl documents `/source-charset:<value>` and `/utf-8` in its own `/?`
+  # output; the driver-style `-finput-charset=UTF-8` that plain clang and GCC
+  # take is ignored in clang-cl mode.
+  $<$<COMPILE_LANG_AND_ID:C,MSVC>:/source-charset:utf-8>
+  $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/source-charset:utf-8>
+  $<$<COMPILE_LANG_AND_ID:C,Clang>:/utf-8>
+  $<$<COMPILE_LANG_AND_ID:CXX,Clang>:/utf-8>
   $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Release,RelWithDebInfo,MinSizeRel>>:/EHs-c->
 )
 
