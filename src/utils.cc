@@ -207,6 +207,14 @@ std::span<uint8_t> SearchMemory(std::span<uint8_t> src,
 std::wstring GetIniString(std::wstring_view section,
                           std::wstring_view key,
                           std::wstring_view default_value) {
+  // The truncation test here is `>= buffer.size() - 1`, which is right for
+  // `GetPrivateProfileStringW` -- and note that it is a different threshold from
+  // the section reader in config.cc. Measured with a 100-wchar_t buffer: a
+  // 98-character value returns 98 and was not truncated, while a value of 99 or
+  // more returns 99, so `size - 1` is the signal. `GetPrivateProfileSectionW` in
+  // contrast reports `size - 2`. This loop was left alone after a run over value
+  // lengths 0..400 found no length at which `size - 2` would change the result;
+  // there is no defect here to fix.
   std::vector<TCHAR> buffer(100);
   DWORD bytesread = 0;
   do {

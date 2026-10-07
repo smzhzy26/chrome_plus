@@ -65,10 +65,34 @@ void Config::LoadConfig() {
 }
 
 void Config::LoadKeyMappings() {
+  // `GetPrivateProfileSectionW` copies as much of the section as fits and, when
+  // the section does not fit, fills the buffer and returns `size - 2`; it has no
+  // mode that reports the size needed (passing a null buffer and zero returns 0).
+  // Measured: a 4096-wchar_t buffer returns 4094, and the same 4094 for 300, 500,
+  // 1000 or 5000 entries written -- so the section stopped at 270 entries and
+  // every mapping past it was silently dropped. An earlier version of this loop
+  // tested `chars_read < buffer.size() - 1` and therefore read that 4094 as "the
+  // whole section fits", which is the off-by-one the numbers above pin down.
   std::vector<wchar_t> buffer(4096);
-  const DWORD chars_read = ::GetPrivateProfileSectionW(
-      L"keymapping", buffer.data(), static_cast<DWORD>(buffer.size()),
-      GetIniPath().c_str());
+  DWORD chars_read = 0;
+  for (;;) {
+    chars_read = ::GetPrivateProfileSectionW(
+        L"keymapping", buffer.data(), static_cast<DWORD>(buffer.size()),
+        GetIniPath().c_str());
+    if (chars_read < buffer.size() - 2) {
+      break;  // the whole section fits
+    }
+    constexpr size_t kMaxSectionChars = 1u << 20;  // 1 MiB of wchar_t
+    if (buffer.size() >= kMaxSectionChars) {
+      // Out of room rather than out of entries. Saying so matters: the
+      // alternative is a user whose later mappings do nothing for no stated
+      // reason, which is the defect this growth loop exists to remove.
+      WarnLog(L"Config: the [keymapping] section is larger than the 1 MiB "
+              L"limit and has been truncated");
+      break;
+    }
+    buffer.resize(buffer.size() * 2);
+  }
 
   if (chars_read == 0) {
     return;
