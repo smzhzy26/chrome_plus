@@ -13,6 +13,7 @@
 #include <cstring>
 #include <cwctype>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -417,4 +418,34 @@ UINT ParseHotkeys(std::wstring_view keys, bool no_repeat) {
     modifiers |= MOD_NOREPEAT;
 
   return MAKELPARAM(modifiers, virtual_key);
+}
+
+// One `[chrome++] ...` line appended to Chrome++_Debug.log.
+//
+// Built from plain Win32 calls and concatenation on purpose: routing this
+// through `std::format`, `std::wofstream` and `std::filesystem` pulls in enough
+// to grow the DLL by roughly 480 KB, and unlike `DebugLog` this is always
+// compiled in, including in the shipped release builds.
+void WarnLog(std::wstring_view message) {
+  static std::mutex log_mutex;
+  std::lock_guard<std::mutex> lock(log_mutex);
+
+  std::wstring path = GetAppDir();
+  path.append(L"Chrome++_Debug.log");
+
+  const HANDLE file = ::CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                    OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return;
+  }
+
+  std::wstring line = L"[chrome++] ";
+  line.append(message);
+  line.append(L"\r\n");
+
+  const DWORD bytes = static_cast<DWORD>(line.size() * sizeof(wchar_t));
+  DWORD written = 0;
+  ::WriteFile(file, line.data(), bytes, &written, nullptr);
+  ::CloseHandle(file);
 }

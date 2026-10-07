@@ -51,6 +51,16 @@ class Config {
   using KeyMappingPair = std::pair<std::wstring, std::wstring>;
   const auto& GetKeyMappings() const { return key_mappings_; }
 
+  // Test hooks. Config is a singleton with a private constructor, so a test
+  // cannot build one; these let a test create a real object and supply the parsed
+  // `[keymapping]` state, so the real loading path can be exercised instead of
+  // its output being poked at. Neither has a production caller.
+  static Config& CreateForTesting() { return *new Config(); }
+  std::vector<KeyMappingPair>& MutableKeyMappingsForTest() {
+    return key_mappings_;
+  }
+  std::wstring& MutableTranslateKeyForTest() { return translate_key_; }
+
  private:
   Config();
   ~Config() = default;

@@ -111,6 +111,15 @@ void DebugLog(std::wformat_string<Args...> fmt, Args&&... args) {
 inline void DebugLog(std::wstring_view, auto&&...) {}
 #endif
 
+// A log line that also reaches release builds. `DebugLog` is compiled away
+// outside `_DEBUG`, which means a shipped build says nothing about a
+// configuration it refused -- the user only sees a mapping that silently does
+// not work. This takes an already-built string rather than a format string on
+// purpose: `std::format` and `std::filesystem` in a path that is always
+// compiled in added roughly 480 KB to the DLL, where concatenation costs a few
+// hundred bytes.
+void WarnLog(std::wstring_view message);
+
 // Window and message processing functions
 HWND GetTopWnd(HWND hwnd);
 void ExecuteCommand(int id, HWND hwnd = 0);
