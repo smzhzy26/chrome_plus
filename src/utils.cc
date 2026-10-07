@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <pathcch.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 
@@ -27,10 +28,37 @@ HMODULE hInstance = nullptr;
 // Global constants - use functions to avoid static initialization order issues
 const std::wstring& GetAppDir() {
   static std::wstring app_dir = []() {
-    wchar_t path[MAX_PATH];
-    ::GetModuleFileName(nullptr, path, MAX_PATH);
-    ::PathRemoveFileSpec(path);
-    return std::wstring(path);
+    // `GetModuleFileNameW` truncates to the buffer and signals that by returning
+    // the buffer size, so the buffer is grown until the return value is smaller
+    // than it. Passed MAX_PATH, any executable in a deeper directory produced a
+    // truncated path that every other path helper then inherited.
+    std::vector<wchar_t> path(MAX_PATH);
+    for (;;) {
+      const DWORD written =
+          ::GetModuleFileNameW(nullptr, path.data(),
+                               static_cast<DWORD>(path.size()));
+      if (written == 0) {
+        return std::wstring();
+      }
+      if (written < path.size()) {
+        path.resize(written + 1);  // room for the NUL PathRemoveFileSpec needs
+        break;
+      }
+      constexpr size_t kMaxPathLength = 1u << 16;
+      if (path.size() >= kMaxPathLength) {
+        break;
+      }
+      path.resize(path.size() * 2);
+    }
+    ::PathRemoveFileSpec(path.data());
+    // `PathRemoveFileSpec` leaves a trailing separator when the executable sits
+    // in a drive root (`D:\chrome.exe` -> `D:\`), so this is only a guard for
+    // the degenerate case; measured, the root case already includes it.
+    std::wstring dir(path.data());
+    if (dir.size() == 2 && dir[1] == L':') {
+      dir.push_back(L'\\');
+    }
+    return dir;
   }();
   return app_dir;
 }
@@ -195,28 +223,92 @@ std::wstring GetIniString(std::wstring_view section,
   return std::wstring(buffer.data());
 }
 
-std::wstring CanonicalizePath(const std::wstring& path) {
-  TCHAR temp[MAX_PATH];
-  ::PathCanonicalize(temp, path.data());
-  return std::wstring(temp);
-}
-
-std::wstring GetAbsolutePath(const std::wstring& path) {
-  wchar_t buffer[MAX_PATH];
-  ::GetFullPathNameW(path.c_str(), MAX_PATH, buffer, nullptr);
-  return buffer;
-}
-
-std::wstring ExpandEnvironmentPath(const std::wstring& path) {
+std::optional<std::wstring> CanonicalizePath(const std::wstring& path) {
+  // `PathCanonicalizeW` cannot be used here however large the buffer is: it
+  // rejects any input past MAX_PATH with ERROR_FILENAME_EXCED_RANGE, measured at
+  // 261 characters with a 465-character output buffer and still failing. So the
+  // canonicalization comes from `PathCchCanonicalizeEx` with
+  // PATHCCH_ALLOW_LONG_PATHS, which returns byte-identical results for short
+  // input (`C:\App\..\user_data` -> `C:\user_data` from both).
+  //
+  // Which code it returns for a long path depends on the buffer size, and this is
+  // the trap in the retry loop: with a MAX_PATH buffer it reports
+  // ERROR_FILENAME_EXCED_RANGE (260 -> 0x800700CE, 512 -> 0x8007007A
+  // INSUFFICIENT_BUFFER, 1024 -> success, all measured). Treating
+  // FILENAME_EXCED_RANGE as fatal makes the loop give up on the first try, which
+  // is what an earlier version of this function did. Both codes therefore mean
+  // "give me a bigger buffer".
   std::vector<wchar_t> buffer(MAX_PATH);
-  size_t ExpandedLength = ::ExpandEnvironmentStrings(
-      path.c_str(), &buffer[0], static_cast<DWORD>(buffer.size()));
-  if (ExpandedLength > buffer.size()) {
-    buffer.resize(ExpandedLength);
-    ExpandedLength = ::ExpandEnvironmentStrings(
-        path.c_str(), &buffer[0], static_cast<DWORD>(buffer.size()));
+  for (;;) {
+    const HRESULT hr =
+        ::PathCchCanonicalizeEx(buffer.data(), buffer.size(), path.c_str(),
+                                PATHCCH_ALLOW_LONG_PATHS);
+    if (SUCCEEDED(hr)) {
+      return std::wstring(buffer.data());
+    }
+    const bool needs_more =
+        hr == HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) ||
+        hr == HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE);
+    if (!needs_more) {
+      return std::nullopt;
+    }
+    constexpr size_t kMaxPathLength = 1u << 16;
+    if (buffer.size() >= kMaxPathLength) {
+      return std::nullopt;
+    }
+    // Doubling off MAX_PATH would need two rounds before a long path fits; the
+    // first growth jumps straight past MAX_PATH instead.
+    buffer.resize(buffer.size() < 1024 ? 1024 : buffer.size() * 2);
   }
-  return std::wstring(&buffer[0], 0, ExpandedLength);
+}
+
+std::optional<std::wstring> GetAbsolutePath(const std::wstring& path) {
+  std::vector<wchar_t> buffer(MAX_PATH);
+  for (;;) {
+    // The required length including the terminating NUL is the return value
+    // whenever the buffer was too small (measured: a 16-character buffer for a
+    // 22-character path returns 23). That is the signal to grow by.
+    const DWORD needed = ::GetFullPathNameW(path.c_str(),
+                                            static_cast<DWORD>(buffer.size()),
+                                            buffer.data(), nullptr);
+    if (needed == 0) {
+      return std::nullopt;  // the call itself failed
+    }
+    if (needed <= buffer.size()) {
+      return std::wstring(buffer.data());
+    }
+    constexpr size_t kMaxPathLength = 1u << 16;
+    if (needed > kMaxPathLength) {
+      return std::nullopt;
+    }
+    buffer.resize(needed);
+  }
+}
+
+std::optional<std::wstring> ExpandEnvironmentPath(const std::wstring& path) {
+  // The second argument of this constructor is a count, not a position, so the
+  // original `std::wstring(&buffer[0], 0, ExpandedLength)` was already correct
+  // (measured against the raw expansion); what it did not do was notice failure.
+  // `ExpandEnvironmentStringsW` returns 0 on error and the length including the
+  // terminating NUL otherwise, so a zero return has to be distinguished from an
+  // empty expansion rather than silently producing an empty string.
+  std::vector<wchar_t> buffer(MAX_PATH);
+  for (;;) {
+    const DWORD written = ::ExpandEnvironmentStringsW(
+        path.c_str(), buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (written == 0) {
+      return std::nullopt;
+    }
+    if (written <= buffer.size()) {
+      // `written` counts the NUL, which the returned string must not contain.
+      return std::wstring(buffer.data(), written - 1);
+    }
+    constexpr size_t kMaxPathLength = 1u << 16;
+    if (written > kMaxPathLength) {
+      return std::nullopt;
+    }
+    buffer.resize(written);
+  }
 }
 
 HWND GetTopWnd(HWND hwnd) {
@@ -256,7 +348,15 @@ void LaunchCommands(const std::wstring& get_commands) {
     return;
   }
   for (const auto& command : commands) {
-    std::wstring expanded_path = ExpandEnvironmentPath(command);
+    auto expanded = ExpandEnvironmentPath(command);
+    if (!expanded) {
+      // Running the command with an unexpanded path would launch the wrong
+      // thing, so it is skipped and reported instead.
+      WarnLog(L"ExecuteCommands: cannot expand the environment in '" + command +
+              L"'; command skipped");
+      continue;
+    }
+    std::wstring& expanded_path = *expanded;
     ReplaceStringInPlace(expanded_path, L"%app%", GetAppDir());
 
     // Using `start` launches the command in a new window asynchronously,

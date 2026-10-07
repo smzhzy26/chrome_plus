@@ -197,6 +197,9 @@ target_link_libraries(chrome_plus PRIVATE
   onecore
   propsys
   oleacc
+  # PathCchCanonicalizeEx, which handles paths longer than MAX_PATH where
+  # PathCanonicalizeW refuses regardless of the output buffer size.
+  pathcch
   detours
   mini_gzip
 )

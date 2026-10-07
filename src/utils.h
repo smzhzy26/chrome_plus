@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -76,14 +77,23 @@ std::wstring GetIniString(std::wstring_view section,
                           std::wstring_view key,
                           std::wstring_view default_value);
 
-// Canonicalize the path
-std::wstring CanonicalizePath(const std::wstring& path);
+// Canonicalize the path. Returns nullopt when the path cannot be canonicalized;
+// an empty string is never a valid result, which is what the previous
+// `std::wstring` return made impossible to tell apart from failure.
+//
+// These three used to return `std::wstring` and silently produced an empty one
+// past MAX_PATH, because each wrote into a fixed `wchar_t[MAX_PATH]`. The caller
+// in config.cc then compared an empty string, found nothing, and fell through to
+// `nullopt` -- so `data_dir` and `cache_dir` were discarded with no message
+// whenever the installation path was long. Returning `std::optional` makes the
+// compiler require every caller to consider that case.
+std::optional<std::wstring> CanonicalizePath(const std::wstring& path);
 
-// Get the absolute path
-std::wstring GetAbsolutePath(const std::wstring& path);
+// Get the absolute path, or nullopt if it cannot be produced.
+std::optional<std::wstring> GetAbsolutePath(const std::wstring& path);
 
-// Expand environment variables in the path
-std::wstring ExpandEnvironmentPath(const std::wstring& path);
+// Expand environment variables in the path, or nullopt if expansion fails.
+std::optional<std::wstring> ExpandEnvironmentPath(const std::wstring& path);
 
 // Debug log function
 #if defined(_DEBUG)

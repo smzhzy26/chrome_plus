@@ -102,21 +102,43 @@ void Config::LoadKeyMappings() {
 }
 
 std::optional<std::wstring> Config::LoadDirPath(const std::wstring& dir_type) {
-  std::wstring path = CanonicalizePath(GetAppDir() + L"\\..\\" + dir_type);
+  // Both helpers can now fail outright, and each failure has to be told apart
+  // from a legitimate value. `CanonicalizePath` used to answer an empty string
+  // for any path past MAX_PATH, which this function then handed to
+  // `GetIniString` as the default: the directory silently became nullopt and the
+  // user's own `data_dir` / `cache_dir` was discarded without a message.
+  const auto path = CanonicalizePath(GetAppDir() + L"\\..\\" + dir_type);
+  if (!path) {
+    WarnLog(L"Config: cannot resolve the default directory for '" + dir_type +
+            L"'; the setting is ignored");
+    return std::nullopt;
+  }
+
   std::wstring dir_key = dir_type + L"_dir";
-  std::wstring dir_buffer = GetIniString(L"general", dir_key, path);
+  std::wstring dir_buffer = GetIniString(L"general", dir_key, *path);
 
   if (dir_buffer == L"none") {
     return std::nullopt;
   }
 
   if (dir_buffer.empty()) {
-    dir_buffer = path;
+    dir_buffer = *path;
   }
 
-  std::wstring expanded_path = ExpandEnvironmentPath(dir_buffer);
-  ReplaceStringInPlace(expanded_path, L"%app%", GetAppDir());
-  return GetAbsolutePath(expanded_path);
+  auto expanded_path = ExpandEnvironmentPath(dir_buffer);
+  if (!expanded_path) {
+    WarnLog(L"Config: cannot expand the environment in '" + dir_buffer +
+            L"' for '" + dir_key + L"'; the setting is ignored");
+    return std::nullopt;
+  }
+  ReplaceStringInPlace(*expanded_path, L"%app%", GetAppDir());
+  const auto absolute = GetAbsolutePath(*expanded_path);
+  if (!absolute) {
+    WarnLog(L"Config: cannot make '" + *expanded_path +
+            L"' absolute for '" + dir_key + L"'; the setting is ignored");
+    return std::nullopt;
+  }
+  return *absolute;
 }
 
 int Config::LoadHoverTabDelay() {
