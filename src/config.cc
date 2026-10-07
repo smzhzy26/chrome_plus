@@ -45,7 +45,13 @@ void Config::LoadConfig() {
                                                 1, GetIniPath().c_str()) != 0;
   right_click_close_ = ::GetPrivateProfileIntW(L"tabs", L"right_click_close", 0,
                                                GetIniPath().c_str()) != 0;
-  wheel_tab_ = ::GetPrivateProfileIntW(L"tabs", L"wheel_tab", 1,
+  // Off by default, matching the shipped ini: this gesture needs `IsOnTabBar` to
+  // find the tab strip through UI Automation, and Chrome does not expose those
+  // elements unless accessibility is enabled. `wheel_tab_when_press_rbutton`
+  // below does not consult the accessibility tree, so it stays on -- verified on
+  // a default profile, where the right-button gesture switches tabs and does not
+  // open the context menu.
+  wheel_tab_ = ::GetPrivateProfileIntW(L"tabs", L"wheel_tab", 0,
                                        GetIniPath().c_str()) != 0;
   wheel_tab_when_press_rbutton_ =
       ::GetPrivateProfileIntW(L"tabs", L"wheel_tab_when_press_rbutton", 1,
