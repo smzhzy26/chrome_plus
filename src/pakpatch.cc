@@ -190,6 +190,28 @@ bool PatchSettingsHtml(uint8_t* begin, uint32_t size, size_t& new_len) {
   // RemoveUpdateError
   // if (IsNeedPortable())
   {
+    // Hide the whole update-status block and its icon container by binding
+    // `hidden`, rather than by matching the containing element: `about_page.html`
+    // wraps the tag across lines, so only an attribute value is guaranteed to sit
+    // on one line.
+    //
+    // `about_page.ts` computes `showUpdateStatus_ = status !== 'disabled'`, so
+    // every state other than `disabled` renders the block. On a portable install
+    // the updater reports a failure, and the block shows "检查更新时出错" with
+    // the red icon and the support.google.com link; `hidden="true"` covers every
+    // state. Worth hiding even with `OutdatedBuildDetector` disabled, because
+    // this block is fed by the settings page's own update check.
+    //
+    // Both binding syntaxes have to be handled. Chrome 119 still ships the
+    // Polymer template, where the bindings are spelled `[[ ]]`; the Lit form
+    // below belongs to the newer `about_page.html.ts`. Keeping only the Lit form
+    // left the row visible on 119 -- the two replacements below were the
+    // difference between a page that showed the red line and one that did not.
+    ReplaceStringInPlace(html, R"(hidden="[[!showUpdateStatus_]]")",
+                         R"(hidden="true")");
+    ReplaceStringInPlace(html,
+                         R"(hidden="[[!shouldShowIcons_(showUpdateStatus_)]]")",
+                         R"(hidden="true")");
     ReplaceStringInPlace(html, R"(?hidden="${!this.showUpdateStatus_}")",
                          R"(hidden="true")");
     ReplaceStringInPlace(html, R"(?hidden="${!this.shouldShowIcons_()}")",
