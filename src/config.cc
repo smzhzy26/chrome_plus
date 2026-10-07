@@ -20,7 +20,19 @@ Config::Config() {
 
 void Config::LoadConfig() {
   // general
-  command_line_ = GetIniString(L"general", L"command_line", L"");
+  //
+  // The two defaults below are what stop a frozen build from reporting that it
+  // is out of date, and both are per-key defaults that must match the shipped
+  // ini: a key present in the ini wins, and this is what applies when it is
+  // absent. Leaving them different would make deleting the line change the
+  // behaviour, which is the trap the wheel_tab default fell into.
+  //
+  // `OutdatedBuildDetector` is the build-age warning (`UPGRADE_NEEDED_OUTDATED_
+  // INSTALL`); the feature name is present in Chrome 119's chrome.dll, so the
+  // switch still applies to that build. The notification switch covers the
+  // separate installed-versus-running version comparison.
+  command_line_ = GetIniString(L"general", L"command_line",
+                               L"--disable-features=OutdatedBuildDetector");
   launch_on_startup_ = GetIniString(L"general", L"launch_on_startup", L"");
   launch_on_exit_ = GetIniString(L"general", L"launch_on_exit", L"");
   user_data_dir_ = LoadDirPath(L"data");
@@ -35,7 +47,7 @@ void Config::LoadConfig() {
                                              GetIniPath().c_str()) != 0;
   suppress_false_upgrade_notification_ =
       ::GetPrivateProfileIntW(L"general",
-                              L"suppress_false_upgrade_notification", 0,
+                              L"suppress_false_upgrade_notification", 1,
                               GetIniPath().c_str()) != 0;
 
   // tabs
