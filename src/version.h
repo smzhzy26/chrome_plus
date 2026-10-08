@@ -10,7 +10,7 @@
 #endif
 
 #ifndef RELEASE_VER_FIX
-#define RELEASE_VER_FIX 9
+#define RELEASE_VER_FIX 10
 #endif
 
 #ifndef RELEASE_VER_PRE_SUFFIX
