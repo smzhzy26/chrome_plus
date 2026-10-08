@@ -85,16 +85,26 @@ jobs:
     needs: build
     runs-on: ubuntu-slim
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
+    # The built-in token is used, so no repository secret has to be configured
+    # for a fork to release. Creating a pull request needs its own permission:
+    # without `pull-requests: write` the token cannot open one.
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Set up Git Configurations
+        # A branch of its own, so the version bump never moves a branch someone
+        # else works on. `release` used to be overwritten here with `--force`,
+        # which discarded whatever it held; nothing outside this workflow is
+        # touched now.
         run: |
           git config user.name "Bush2021"
           git config user.email "79072750+Bush2021@users.noreply.github.com"
-          git checkout -b release
+          git checkout -b chore/version-bump
 
       - name: Update version.h
         run: |
@@ -114,13 +124,28 @@ jobs:
           sed -i 's|#define RELEASE_VER_PRE_SUFFIX .*|#define RELEASE_VER_PRE_SUFFIX "'"$PRE_SUFFIX"'"|' src/version.h
           git add src/version.h
           git commit -m "build(release): bump version to $VERSION" -m "Build-Run-Id: ${{ github.run_id }}"
-          git push origin release --force
+          # No `--force`: this branch is written by this workflow alone, so a fast
+          # forward is always correct and a rejected push means something else
+          # moved it, which is worth seeing rather than overwriting.
+          git push origin chore/version-bump
 
-      - name: Create Pull Request
+      - name: Create or Reuse Pull Request
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          # `gh` reads GH_TOKEN, not GITHUB_TOKEN. The default token is always
+          # present, so a fork needs no secret; a missing `TOKEN` secret is what
+          # made this step fail with "set the GH_TOKEN environment variable".
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr create --base main --head release --title "build(release): bump version to ${{ github.event.inputs.version }}" --body "Bump version to ${{ github.event.inputs.version }}"
+          TITLE="build(release): bump version to ${{ github.event.inputs.version }}"
+          BODY="Bump version to ${{ github.event.inputs.version }}"
+          # Re-running a release must not fail just because the previous pull
+          # request was not merged yet, so an existing one is reported instead.
+          if gh pr create --base main --head chore/version-bump --title "$TITLE" --body "$BODY"; then
+            exit 0
+          fi
+          echo "Could not create a pull request; checking whether one already exists." >&2
+          gh pr view chore/version-bump --json url,state,title
+          exit 1
 
       - name: Output Run ID
         run: echo "RUN_ID=${{ github.run_id }}" >> $GITHUB_OUTPUT
