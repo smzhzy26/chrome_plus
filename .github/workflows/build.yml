@@ -123,11 +123,23 @@ jobs:
           sed -i 's/#define RELEASE_VER_FIX .*/#define RELEASE_VER_FIX '"$PATCH"'/' src/version.h
           sed -i 's|#define RELEASE_VER_PRE_SUFFIX .*|#define RELEASE_VER_PRE_SUFFIX "'"$PRE_SUFFIX"'"|' src/version.h
           git add src/version.h
-          git commit -m "build(release): bump version to $VERSION" -m "Build-Run-Id: ${{ github.run_id }}"
-          # No `--force`: this branch is written by this workflow alone, so a fast
-          # forward is always correct and a rejected push means something else
-          # moved it, which is worth seeing rather than overwriting.
-          git push origin chore/version-bump
+          if git diff --cached --quiet; then
+            # The version asked for is already the one on the branch. Committing
+            # would fail with "nothing to commit" and stop the job, which is a
+            # confusing way to say the version is already set; there is also
+            # nothing to propose, so no pull request is opened for it.
+            echo "src/version.h already declares $VERSION; nothing to bump."
+            echo "BUMPED=false" >> "$GITHUB_ENV"
+          else
+            git commit -m "build(release): bump version to $VERSION" -m "Build-Run-Id: ${{ github.run_id }}"
+            echo "BUMPED=true" >> "$GITHUB_ENV"
+            # A previous run's branch has to be replaceable, otherwise a re-run of
+            # the same version is rejected as a non-fast-forward. This branch is
+            # written by this workflow alone, so replacing it is safe. `--force`
+            # rather than `--force-with-lease`: the checkout is shallow and has no
+            # remote-tracking ref for this branch to compare against.
+            git push --force origin chore/version-bump
+          fi
 
       - name: Create or Reuse Pull Request
         env:
@@ -136,6 +148,13 @@ jobs:
           # made this step fail with "set the GH_TOKEN environment variable".
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [ "${BUMPED}" != "true" ]; then
+            # Nothing was committed, so there is no branch to propose. Saying so is
+            # the whole point of the guard in the previous step; failing here would
+            # report a missing change as a broken release.
+            echo "No version change to propose."
+            exit 0
+          fi
           TITLE="build(release): bump version to ${{ github.event.inputs.version }}"
           BODY="Bump version to ${{ github.event.inputs.version }}"
           # Re-running a release must not fail just because the previous pull
