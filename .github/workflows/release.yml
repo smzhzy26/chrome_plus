@@ -14,15 +14,13 @@ on:
 
 jobs:
   release:
+    # `contains`, not `startsWith`: the version bump reaches `master` as a merge
+    # commit whose subject is `Merge pull request #N from ...`, with the bump
+    # message on a later line. `startsWith` therefore rejected every pull-request
+    # merge and the job never ran.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (
-        startsWith(
-          github.event.head_commit.message,
-          'build(release): bump version to '
-        ) &&
-        contains(github.event.head_commit.message, 'Build-Run-Id:')
-      )
+      contains(github.event.head_commit.message, 'build(release): bump version to ')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -99,13 +97,36 @@ jobs:
       - name: Get Build Run ID
         id: workflow
         run: |
+          # The bump commit carries `Build-Run-Id:` as a trailer, and the pull
+          # request that delivers it is merged with a merge commit that keeps only
+          # that commit's subject line. The trailer is therefore not in
+          # `%b` (the body) of the merge commit. It is in the message of one of
+          # the parents, so the parents are searched rather than just the head.
+          #
+          # `%B` is the whole message, not `%b`: on a merge commit the body is
+          # empty, and the trailer lives on the second parent.
+          find_run_id() {
+            local rev="$1"
+            git log -1 --pretty=format:%B "$rev" 2>/dev/null |
+              grep -oE 'Build-Run-Id: [0-9]+' | grep -oE '[0-9]+' | head -n 1
+          }
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             RUN_ID="${{ github.event.inputs.run_id }}"
           else
-            RUN_ID=$(git log -1 --pretty=format:%b | grep -oP '(?<=Build-Run-Id: )\d+')
+            RUN_ID=""
+            for rev in $(git rev-list --parents -n 1 HEAD); do
+              RUN_ID=$(find_run_id "$rev")
+              if [ -n "$RUN_ID" ]; then
+                echo "Run ID taken from $rev."
+                break
+              fi
+            done
           fi
+
           if [ -z "$RUN_ID" ]; then
-            echo "Could not determine build run ID." >&2
+            echo "Could not determine build run ID. Messages searched:" >&2
+            git log --format='%h %s' -3 >&2
             exit 1
           fi
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
