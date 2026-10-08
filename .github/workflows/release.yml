@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - 'src/version.h'
   workflow_dispatch:
@@ -28,11 +28,16 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
+      # Creating the release writes a tag and a release object. `softprops/
+      # action-gh-release` also pushes the tag, which `contents: write` covers.
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          ref: main
+          # The branch the release is cut from. `main` is an older line without
+          # these commits, so checking it out would package the wrong sources.
+          ref: master
           fetch-depth: 0
 
       - name: Get Version from version.h
@@ -167,4 +172,10 @@ jobs:
           name: ${{ env.VERSION }}
           prerelease: ${{ env.IS_PRERELEASE }}
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          # The action reads GITHUB_TOKEN, which is the name it expects. A
+          # `TOKEN` secret takes precedence when it is set, so an existing
+          # configuration keeps working; otherwise the built-in token is used,
+          # which is what `permissions: contents: write` above grants. Without
+          # that fallback a fork with no `TOKEN` secret published nothing,
+          # because an undefined secret expands to an empty string.
+          GITHUB_TOKEN: ${{ secrets.TOKEN || secrets.GITHUB_TOKEN }}

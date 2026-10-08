@@ -140,7 +140,11 @@ jobs:
           BODY="Bump version to ${{ github.event.inputs.version }}"
           # Re-running a release must not fail just because the previous pull
           # request was not merged yet, so an existing one is reported instead.
-          if gh pr create --base main --head chore/version-bump --title "$TITLE" --body "$BODY"; then
+          # `master` is where the releases are built from, and it is the
+          # repository's default branch. Naming it explicitly keeps this correct
+          # even if the default is changed, and matters because `main` is an
+          # older line that does not carry these commits.
+          if gh pr create --base master --head chore/version-bump --title "$TITLE" --body "$BODY"; then
             exit 0
           fi
           echo "Could not create a pull request; checking whether one already exists." >&2
