@@ -2,15 +2,15 @@
 #define CHROME_PLUS_SRC_VERSION_H_
 
 #ifndef RELEASE_VER_MAIN
-#define RELEASE_VER_MAIN 1
+#define RELEASE_VER_MAIN 26
 #endif
 
 #ifndef RELEASE_VER_SUB
-#define RELEASE_VER_SUB 18
+#define RELEASE_VER_SUB 10
 #endif
 
 #ifndef RELEASE_VER_FIX
-#define RELEASE_VER_FIX 2
+#define RELEASE_VER_FIX 8
 #endif
 
 #ifndef RELEASE_VER_PRE_SUFFIX
