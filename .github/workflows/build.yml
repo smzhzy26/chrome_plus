@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (SemVer)'
+        description: 'Release version (SemVer). Leave empty for a build that is not released.'
         required: false
       build_mode:
         description: 'Build mode'
@@ -81,29 +81,41 @@ jobs:
           name: version-${{ matrix.arch }}${{ env.BUILD_MODE == 'debug' && '-debug' || '' }}-${{ env.VERSION }}
           path: out/${{ matrix.arch }}/${{ env.BUILD_MODE }}/*
 
-  create_pr:
+  # Records the version in `src/version.h` on `master`, then starts the release.
+  #
+  # The version is committed rather than proposed in a pull request: `master` has
+  # no branch protection here, and the release is driven by a workflow that has to
+  # run after the artifacts exist, so a branch and a merge added two manual steps
+  # without guarding anything.
+  #
+  # The release is started with `gh workflow run` rather than by letting the push
+  # trigger it. A push made with the built-in `GITHUB_TOKEN` does not trigger
+  # workflows -- GitHub suppresses that so a workflow cannot recurse through its
+  # own commits -- so relying on the push would silently publish nothing. An
+  # explicit dispatch is not suppressed, and it carries the run id that holds the
+  # artifacts, which saves the release from searching the history for it.
+  publish:
     needs: build
     runs-on: ubuntu-slim
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
+    permissions:
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Set up Git Configurations
-        run: |
-          git config user.name "Bush2021"
-          git config user.email "79072750+Bush2021@users.noreply.github.com"
-          git checkout -b release
-
       - name: Update version.h
         run: |
+          set -euo pipefail
+          git config user.name "Bush2021"
+          git config user.email "79072750+Bush2021@users.noreply.github.com"
           VERSION="${{ github.event.inputs.version }}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
             echo "Invalid version '$VERSION'. Expected SemVer like 1.2.3 or 1.2.3-alpha.1" >&2
             exit 1
           fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
           CORE="${VERSION%%-*}"
           PRE="${VERSION#*-}"
           if [ "$PRE" = "$VERSION" ]; then PRE_SUFFIX=""; else PRE_SUFFIX="-$PRE"; fi
@@ -113,14 +125,31 @@ jobs:
           sed -i 's/#define RELEASE_VER_FIX .*/#define RELEASE_VER_FIX '"$PATCH"'/' src/version.h
           sed -i 's|#define RELEASE_VER_PRE_SUFFIX .*|#define RELEASE_VER_PRE_SUFFIX "'"$PRE_SUFFIX"'"|' src/version.h
           git add src/version.h
-          git commit -m "build(release): bump version to $VERSION" -m "Build-Run-Id: ${{ github.run_id }}"
-          git push origin release --force
+          if git diff --cached --quiet; then
+            # The version asked for is already on the branch. Committing would fail
+            # with "nothing to commit" and report a version that is already set as
+            # a broken release, so say what happened and still start the release.
+            echo "src/version.h already declares $VERSION."
+          else
+            git commit -m "build(release): bump version to $VERSION" -m "Build-Run-Id: ${{ github.run_id }}"
+            git push origin HEAD:master
+          fi
 
-      - name: Create Pull Request
+      - name: Start Release
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr create --base main --head release --title "build(release): bump version to ${{ github.event.inputs.version }}" --body "Bump version to ${{ github.event.inputs.version }}"
+          # `github.run_id` is this workflow run, which is also the run holding the
+          # artifacts the release downloads.
+          if gh workflow run release.yml --ref master -f run_id=${{ github.run_id }}; then
+            echo "Release workflow started for run ${{ github.run_id }}."
+            exit 0
+          fi
+          # Worth failing loudly: without this the version is recorded and no
+          # release is ever produced, which is easy to miss. The release can still
+          # be started by hand from the Actions tab with the same run id.
+          echo "::error::Could not start the Release workflow. Start it by hand from Actions -> Release with run_id=${{ github.run_id }}."
+          exit 1
 
       - name: Output Run ID
         run: echo "RUN_ID=${{ github.run_id }}" >> $GITHUB_OUTPUT

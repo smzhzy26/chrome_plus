@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - 'src/version.h'
   workflow_dispatch:
@@ -14,25 +14,32 @@ on:
 
 jobs:
   release:
+    # Started either by hand (`workflow_dispatch`) or by `build.yml` through
+    # `gh workflow run`, which arrives as a `workflow_dispatch` event too, so both
+    # paths are accepted by the same check.
+    #
+    # The `push` trigger on `src/version.h` is kept for a version committed by
+    # hand. It cannot fire for the version `build.yml` commits during a release:
+    # a push made with the built-in `GITHUB_TOKEN` does not trigger workflows, and
+    # `build.yml` therefore starts this one explicitly instead of relying on it.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (
-        startsWith(
-          github.event.head_commit.message,
-          'build(release): bump version to '
-        ) &&
-        contains(github.event.head_commit.message, 'Build-Run-Id:')
-      )
+      contains(github.event.head_commit.message, 'build(release): bump version to ')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       attestations: write
       artifact-metadata: write
+      # Creating the release writes a tag and a release object; the action also
+      # pushes that tag.
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          ref: main
+          # `main` is an older line without these commits, so checking it out
+          # would package the wrong sources.
+          ref: master
           fetch-depth: 0
 
       - name: Get Version from version.h
@@ -97,10 +104,14 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             RUN_ID="${{ github.event.inputs.run_id }}"
           else
-            RUN_ID=$(git log -1 --pretty=format:%b | grep -oP '(?<=Build-Run-Id: )\d+')
+            # A version pushed by hand. `%B` is the whole message because on a
+            # merge commit the body is empty and the trailer sits on a parent.
+            RUN_ID=$(git log -1 --pretty=format:%B | grep -oE 'Build-Run-Id: [0-9]+' | grep -oE '[0-9]+' | head -n 1)
           fi
           if [ -z "$RUN_ID" ]; then
-            echo "Could not determine build run ID." >&2
+            echo "Could not determine build run ID. Pass it as the run_id input," \
+                 "or put a 'Build-Run-Id: <id>' trailer on the commit that" \
+                 "changed src/version.h." >&2
             exit 1
           fi
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
@@ -167,4 +178,8 @@ jobs:
           name: ${{ env.VERSION }}
           prerelease: ${{ env.IS_PRERELEASE }}
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          # The action reads `GITHUB_TOKEN`. A `TOKEN` secret takes precedence when
+          # one is configured; otherwise the built-in token is used, which is what
+          # `permissions: contents: write` above grants. Without that fallback an
+          # undefined secret expands to an empty string and nothing is published.
+          GITHUB_TOKEN: ${{ secrets.TOKEN || secrets.GITHUB_TOKEN }}
